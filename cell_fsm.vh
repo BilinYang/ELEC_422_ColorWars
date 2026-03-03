@@ -1,0 +1,57 @@
+/////////////////////////////////////////////////////////////
+// Created by: Synopsys DC Expert(TM) in wire load mode
+// Version   : U-2022.12-SP7
+// Date      : Mon Mar  2 21:45:01 2026
+/////////////////////////////////////////////////////////////
+
+
+module cell_fsm ( clka, clkb, age_change_enable, takeover_enable, player_reg, 
+        first_turn_reg, state );
+  output [2:0] state;
+  input clka, clkb, age_change_enable, takeover_enable, player_reg,
+         first_turn_reg;
+  wire   n30, n31, n32, n33, n34, n35, n36, n37, n38, n39, n40, n41, n42, n43,
+         n44, n45, n46, n47, n48, n49, n50, n51, n52, n53, n54, n55, n56, n57,
+         n58, n59;
+  wire   [2:0] temp_state;
+
+  DFFNEGX1 \state_reg[0]  ( .D(temp_state[0]), .CLK(clkb), .Q(state[0]) );
+  DFFNEGX1 \temp_state_reg[1]  ( .D(n30), .CLK(clka), .Q(temp_state[1]) );
+  DFFNEGX1 \state_reg[1]  ( .D(temp_state[1]), .CLK(clkb), .Q(state[1]) );
+  DFFNEGX1 \temp_state_reg[2]  ( .D(n32), .CLK(clka), .Q(temp_state[2]) );
+  DFFNEGX1 \state_reg[2]  ( .D(temp_state[2]), .CLK(clkb), .Q(state[2]) );
+  DFFNEGX1 \temp_state_reg[0]  ( .D(n31), .CLK(clka), .Q(temp_state[0]) );
+  OAI21X1 U35 ( .A(n33), .B(n34), .C(n35), .Y(n32) );
+  OAI21X1 U36 ( .A(n36), .B(n37), .C(temp_state[2]), .Y(n35) );
+  INVX1 U37 ( .A(n38), .Y(n37) );
+  MUX2X1 U38 ( .B(n33), .A(n39), .S(n40), .Y(n38) );
+  NAND2X1 U39 ( .A(n41), .B(n42), .Y(n31) );
+  MUX2X1 U40 ( .B(n43), .A(n44), .S(n34), .Y(n42) );
+  NOR2X1 U41 ( .A(n33), .B(n40), .Y(n44) );
+  NOR2X1 U42 ( .A(n45), .B(n46), .Y(n43) );
+  AOI22X1 U43 ( .A(n47), .B(player_reg), .C(n48), .D(temp_state[0]), .Y(n41)
+         );
+  MUX2X1 U44 ( .B(n49), .A(n50), .S(n34), .Y(n48) );
+  NOR2X1 U45 ( .A(state[1]), .B(n39), .Y(n50) );
+  NOR2X1 U46 ( .A(n51), .B(state[0]), .Y(n39) );
+  INVX1 U47 ( .A(n33), .Y(n49) );
+  NOR2X1 U48 ( .A(takeover_enable), .B(age_change_enable), .Y(n33) );
+  MUX2X1 U49 ( .B(n52), .A(n53), .S(n34), .Y(n47) );
+  NAND2X1 U50 ( .A(n51), .B(n46), .Y(n53) );
+  NAND2X1 U51 ( .A(takeover_enable), .B(n45), .Y(n52) );
+  MUX2X1 U52 ( .B(n54), .A(n55), .S(n56), .Y(n30) );
+  NOR2X1 U53 ( .A(n51), .B(n57), .Y(n56) );
+  MUX2X1 U54 ( .B(n45), .A(n46), .S(n58), .Y(n57) );
+  NOR2X1 U55 ( .A(state[1]), .B(n36), .Y(n58) );
+  INVX1 U56 ( .A(n34), .Y(n36) );
+  XOR2X1 U57 ( .A(state[2]), .B(n40), .Y(n34) );
+  INVX1 U58 ( .A(age_change_enable), .Y(n45) );
+  INVX1 U59 ( .A(n59), .Y(n51) );
+  AOI21X1 U60 ( .A(age_change_enable), .B(first_turn_reg), .C(takeover_enable), 
+        .Y(n59) );
+  INVX1 U61 ( .A(temp_state[1]), .Y(n55) );
+  OAI21X1 U62 ( .A(state[2]), .B(n46), .C(n40), .Y(n54) );
+  INVX1 U63 ( .A(state[1]), .Y(n40) );
+  INVX1 U64 ( .A(state[0]), .Y(n46) );
+endmodule
+
