@@ -11,13 +11,13 @@ module cell_tb ();
     wire [2:0] state;
 
     cell_fsm main (
-        .clka(clka),
-        .clkb(clkb),
-        .age_change_enable(ace),
-        .takeover_enable(te),
-        .player_reg(preg),
-        .first_turn_reg(ftreg),
-        .state(state)
+        .clka_in(clka),
+        .clkb_in(clkb),
+        .age_change_enable_in(ace),
+        .takeover_enable_in(te),
+        .player_reg_in(preg),
+        .first_turn_reg_in(ftreg),
+        .state_out(state)
     );
 
     // Two-phase clock: clka computes next state, clkb latches it

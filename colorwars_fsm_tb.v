@@ -29,25 +29,24 @@ module tb_game_fsm;
     wire multiple_inputs_error;
     wire [2:0] state;
 
-    // Unit under test
-    game_fsm uut (
-        .clk_a(clk_a),
-        .reset(reset),
-        .win_register(win_register),
-        .row(row),
-        .column(column),
-        .confirm(confirm),
-        .cell_is_empty(cell_is_empty),
-        .cell_is_other_player(cell_is_other_player),
-        .explode_flag(explode_flag),
-        .first_turn_flag(first_turn_flag),
-        .iterate_done(iterate_done),
-        .start_iteration(start_iteration),
-        .clear_errors(clear_errors),
-        .show_empty_error(show_empty_error),
-        .show_owner_error(show_owner_error),
-        .multiple_inputs_error(multiple_inputs_error),
-        .state(state)
+    colorwars_fsm uut (
+        .clk_a_in(clk_a),
+        .reset_in(reset),
+        .win_register_in(win_register),
+        .row_in(row),
+        .column_in(column),
+        .confirm_in(confirm),
+        .cell_is_empty_in(cell_is_empty),
+        .cell_is_other_player_in(cell_is_other_player),
+        .explode_flag_in(explode_flag),
+        .first_turn_flag_in(first_turn_flag),
+        .iterate_done_in(iterate_done),
+        .start_iteration_out(start_iteration),
+        .clear_errors_out(clear_errors),
+        .show_empty_error_out(show_empty_error),
+        .show_owner_error_out(show_owner_error),
+        .multiple_inputs_error_out(multiple_inputs_error),
+        .state_out(state)
     );
 
     // 10ns clock period

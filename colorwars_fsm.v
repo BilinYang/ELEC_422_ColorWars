@@ -4,18 +4,18 @@
 // Handles turn flow: validates player input, triggers cell updates,
 // and manages chain reactions from explosions.
 
-module game_fsm (
+module colorwars_fsm (
     input  wire        clk_a,
     input  wire        reset,               // async reset, active-high
 
     // Player inputs (active when buttons pressed)
-    input  wire        win_register,        // game over flag from datapath
+    input  wire        win_register_in,        // game over flag from datapath
     input  wire [4:0]  row,                 // one-hot row selection
     input  wire [4:0]  column,              // one-hot column selection
     input  wire        confirm,             // player confirms their move
 
     // Feedback from datapath about current board state
-    input  wire        cell_is_empty,       // selected cell has no owner
+    input  wire        cell_is_empty_in,       // selected cell has no owner
     input  wire        cell_is_other_player,// selected cell belongs to opponent
     input  wire        explode_flag,        // at least one cell exploded this pass
     input  wire        first_turn_flag,     // true until first valid move is made
@@ -38,7 +38,7 @@ module game_fsm (
     localparam GAME_END              = 3'd3;  // someone won, game frozen
     localparam RESET_STATE           = 3'd4;  // initial state after reset
 
-    reg [2:0] next_state;
+    reg [2:0] next_stat;
 
     // Detect if player pressed more than one button in a row or column
     // (one-hot should have at most one bit set, so x & (x-1) should be 0)
@@ -64,7 +64,6 @@ module game_fsm (
         multiple_inputs_error = 1'b0;
 
         case (state)
-
             IDLE: begin
                 // Check for game over first
                 if (win_register)
@@ -82,7 +81,7 @@ module game_fsm (
                     multiple_inputs_error = 1'b1; 
                     next_state = IDLE; 
                 end 
-                else if (cell_is_empty && first_turn_flag) begin
+                else if (cell_is_empty_in && first_turn_flag_in) begin
                     // After first turn, can't click empty cells
                     show_empty_error = 1'b1;
                     next_state = IDLE;

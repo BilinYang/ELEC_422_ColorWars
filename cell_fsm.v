@@ -4,12 +4,12 @@
 // reaches 3 and the cell is activated again, it explodes and affects neighbors.
 
 module cell_fsm(
-	input clka, clkb,
-	input age_change_enable,  // increment age, keep same player (player clicked this cell)
-	input takeover_enable,    // increment age and change owner (neighbor exploded)
-	input player_reg,         // 0 = Player 1's turn, 1 = Player 2's turn
-	input first_turn_reg,     // high during the very first turn of the game
-	output reg [2:0] state
+	input clka_in, clkb_in,
+	input age_change_enable_in,
+	input takeover_enable_in,
+	input player_reg_in,
+	input first_turn_reg_in,
+	output reg [2:0] state_out
 );
 
 // State encoding: bits [2:1] = age (0-3), bit [0] = player (0=P1, 1=P2)
@@ -26,53 +26,53 @@ parameter EXP   = 3'b001;  // explosion state (lasts one cycle, then goes empty)
 reg [2:0] temp_state;
 
 // Compute next state on clka falling edge
-always @(negedge clka) begin
-	case (state)
+always @(negedge clka_in) begin
+	case (state_out)
 		// Empty cell can be claimed on first turn, or taken over by explosion
 		EMPTY: begin
-			if ((first_turn_reg & age_change_enable) == 1) begin
-				if (player_reg == 0) temp_state = P1_1;
-				else if (player_reg == 1) temp_state = P2_1;
+			if ((first_turn_reg_in & age_change_enable_in) == 1) begin
+				if (player_reg_in == 0) temp_state = P1_1;
+				else if (player_reg_in == 1) temp_state = P2_1;
 			end
-			if (takeover_enable) begin
-				if (player_reg == 0) temp_state = P1_1;
+			if (takeover_enable_in) begin
+				if (player_reg_in == 0) temp_state = P1_1;
 				else temp_state = P2_1;
 			end
 		end
 
 		// Player 1 cells: age up on click, or get taken over by Player 2's explosion
 		P1_1: begin
-			if (age_change_enable) temp_state = P1_2;
-			else if (takeover_enable && player_reg == 0) temp_state = P1_2;
-			else if (takeover_enable && player_reg == 1) temp_state = P2_2;
+			if (age_change_enable_in) temp_state = P1_2;
+			else if (takeover_enable_in && player_reg_in == 0) temp_state = P1_2;
+			else if (takeover_enable_in && player_reg_in == 1) temp_state = P2_2;
 		end
 		
 		P1_2: begin
-			if (age_change_enable) temp_state = P1_3;
-			else if (takeover_enable && player_reg == 0) temp_state = P1_3;
-			else if (takeover_enable && player_reg == 1) temp_state = P2_3;
+			if (age_change_enable_in) temp_state = P1_3;
+			else if (takeover_enable_in && player_reg_in == 0) temp_state = P1_3;
+			else if (takeover_enable_in && player_reg_in == 1) temp_state = P2_3;
 		end
 		
 		P1_3: begin
 			// Age 3 cells explode when hit again
-			if (age_change_enable || takeover_enable) temp_state = EXP;
+			if (age_change_enable_in || takeover_enable_in) temp_state = EXP;
 		end
 		
 		// Player 2 cells: same logic, mirrored
 		P2_1: begin
-			if (age_change_enable) temp_state = P2_2;
-			else if (takeover_enable && player_reg == 0) temp_state = P1_2;
-			else if (takeover_enable && player_reg == 1) temp_state = P2_2;
+			if (age_change_enable_in) temp_state = P2_2;
+			else if (takeover_enable_in && player_reg_in == 0) temp_state = P1_2;
+			else if (takeover_enable_in && player_reg_in == 1) temp_state = P2_2;
 		end
 
 		P2_2: begin
-			if (age_change_enable) temp_state = P2_3;
-			else if (takeover_enable && player_reg == 0) temp_state = P1_3;
-			else if (takeover_enable && player_reg == 1) temp_state = P2_3;
+			if (age_change_enable_in) temp_state = P2_3;
+			else if (takeover_enable_in && player_reg_in == 0) temp_state = P1_3;
+			else if (takeover_enable_in && player_reg_in == 1) temp_state = P2_3;
 		end
 
 		P2_3: begin
-			if (age_change_enable || takeover_enable) temp_state = EXP;
+			if (age_change_enable_in || takeover_enable_in) temp_state = EXP;
 		end
 
 		// Explosion is transient: clears to empty on the next cycle
@@ -87,8 +87,8 @@ always @(negedge clka) begin
 end
 
 // Latch state on clkb falling edge (two-phase clocking for glitch-free updates)
-always @(negedge clkb) begin
-	state = temp_state;
+always @(negedge clkb_in) begin
+	state_out <= temp_state;
 end
 
 endmodule
