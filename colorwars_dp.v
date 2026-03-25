@@ -2,8 +2,8 @@ module colorwars_dp (
     input wire clka_in, 
     input wire clkb_in, 
     input wire reset_in,
-    input wire row_in,
-    input wire column_in,
+    input wire [4:0] row_in,
+    input wire [4:0] column_in,
     input wire confirm_in,
     input wire [2:0] state_in,
     output reg win_register_out,
@@ -21,7 +21,7 @@ module colorwars_dp (
             for (c=0; c<5; c=c+1) begin: GEN_COL
                 localparam integer i = 5*r + c; 
                 wire [2:0] cell_state; 
-                assign cell_states_wire[(3*IDX)+2 : (3*IDX)] = cell_state;
+                assign cell_states_wire[(3*i)+2 : (3*i)] = cell_state;
                 
                 cell_fsm u_cell (
                     .clka_in(clka_in),
@@ -32,6 +32,8 @@ module colorwars_dp (
                     .first_turn_reg_in(first_turn_reg),
                     .state_out(cell_state)
                 );
+
+                
             end
         end
     endgenerate

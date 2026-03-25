@@ -26,6 +26,7 @@ module colorwars_fsm (
     output reg         clear_errors,        // clear previous error displays
     output reg         show_empty_error,    // can't select empty cell (after first turn)
     output reg         show_owner_error,    // can't select opponent's cell
+    output reg         empty_row_or_col_error,
     output reg         multiple_inputs_error,// pressed multiple rows or columns
 
     output reg [2:0]   state                // current state (useful for debugging)
