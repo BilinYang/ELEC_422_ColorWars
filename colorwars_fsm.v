@@ -1,121 +1,140 @@
 `timescale 1ns / 1ps
 
-// Main game controller FSM for Color Wars
-// Handles turn flow: validates player input, triggers cell updates,
-// and manages chain reactions from explosions.
+// Controller FSM for the Color Wars game.
+//
+// High-level flow:
+//   IDLE -> INPUT_VERIFICATION -> ITERATE_THROUGH_CELLS -> IDLE (or GAME_END)
+//
+// The datapath continuously computes the “is this move valid?” flags.
+// In INPUT_VERIFICATION we sample those flags and either reject the move
+// (with a one-cycle error pulse) or kick off an iteration.
+//
+// While iterating, the board resolves one explosion wave per cycle. We sit in
+// ITERATE_THROUGH_CELLS until the board is stable again, then either end the
+// game or hand off to the other player.
 
 module colorwars_fsm (
-    input  wire        clk_a,
-    input  wire        reset,               // async reset, active-high
+    input  wire       clk_a_in,
+    input  wire       reset_in,
 
-    // Player inputs (active when buttons pressed)
-    input  wire        win_register_in,        // game over flag from datapath
-    input  wire [4:0]  row,                 // one-hot row selection
-    input  wire [4:0]  column,              // one-hot column selection
-    input  wire        confirm,             // player confirms their move
+    // Player inputs
+    input  wire [4:0] row_in,
+    input  wire [4:0] column_in,
+    input  wire       confirm_in,
 
-    // Feedback from datapath about current board state
-    input  wire        cell_is_empty_in,       // selected cell has no owner
-    input  wire        cell_is_other_player,// selected cell belongs to opponent
-    input  wire        explode_flag,        // at least one cell exploded this pass
-    input  wire        first_turn_flag,     // true until first valid move is made
-    input  wire        iterate_done,        // finished scanning all cells
+    // Error flags from datapath (active during INPUT_VERIFICATION)
+    input  wire       cell_is_empty_error_in,
+    input  wire       cell_is_other_player_error_in,
+    input  wire       empty_row_or_col_error_in,
+    input  wire       multiple_inputs_error_in,
 
-    // Control signals sent to datapath
-    output reg         start_iteration,     // kick off cell update scan
-    output reg         clear_errors,        // clear previous error displays
-    output reg         show_empty_error,    // can't select empty cell (after first turn)
-    output reg         show_owner_error,    // can't select opponent's cell
-    output reg         empty_row_or_col_error,
-    output reg         multiple_inputs_error,// pressed multiple rows or columns
+    // Board status from datapath
+    input  wire       any_exploding_in,     // at least one cell is in EXP state
+    input  wire       have_a_winner_in,     // all non-empty cells belong to one player
 
-    output reg [2:0]   state                // current state (useful for debugging)
+    // Control signals to datapath
+    output reg        start_iteration_out,  // pulse: apply the player's move
+    output reg        change_player_out,    // pulse: toggle player register
+
+    // Error display outputs (active for one cycle on error)
+    output reg        show_empty_error_out,
+    output reg        show_owner_error_out,
+    output reg        show_row_col_error_out,
+    output reg        show_multi_error_out,
+
+    // Game status
+    output reg        game_over_out,        // high when in GAME_END state
+    output reg  [2:0] state_out             // current FSM state (debug / external use)
 );
 
-    // FSM states
-    localparam IDLE                  = 3'd0;  // waiting for player input
-    localparam INPUT_VERIFICATION    = 3'd1;  // checking if move is legal
-    localparam ITERATE_THROUGH_CELLS = 3'd2;  // updating cells, handling explosions
-    localparam GAME_END              = 3'd3;  // someone won, game frozen
-    localparam RESET_STATE           = 3'd4;  // initial state after reset
+    // State encoding (kept simple for debug).
+    localparam IDLE                  = 3'd0;
+    localparam INPUT_VERIFICATION    = 3'd1;
+    localparam ITERATE_THROUGH_CELLS = 3'd2;
+    localparam GAME_END              = 3'd3;
+    localparam RESET_STATE           = 3'd4;
 
-    reg [2:0] next_stat;
+    reg [2:0] next_state;
 
-    // Detect if player pressed more than one button in a row or column
-    // (one-hot should have at most one bit set, so x & (x-1) should be 0)
-    wire multiple_rows_pressed    = (row & (row - 1)) != 0;
-    wire multiple_columns_pressed = (column & (column - 1)) != 0;
-    wire multiple_inputs_pressed  = multiple_rows_pressed || multiple_columns_pressed;
-
-    // State register with async reset
-    always @(negedge clk_a or posedge reset) begin
-        if (reset)
-            state <= RESET_STATE;
+    // State register (negedge clock, async reset).
+    always @(negedge clk_a_in or posedge reset_in) begin
+        if (reset_in)
+            state_out <= RESET_STATE;
         else
-            state <= next_state;
+            state_out <= next_state;
     end
 
-    // Combinational logic for next state and outputs
+    // Next-state + outputs (combinational).
     always @(*) begin
-        next_state            = state;
-        start_iteration       = 1'b0;
-        clear_errors          = 1'b0;
-        show_empty_error      = 1'b0;
-        show_owner_error      = 1'b0;
-        multiple_inputs_error = 1'b0;
+        // Default: hold state, pulse nothing.
+        next_state            = state_out;
+        start_iteration_out   = 1'b0;
+        change_player_out     = 1'b0;
+        show_empty_error_out  = 1'b0;
+        show_owner_error_out  = 1'b0;
+        show_row_col_error_out = 1'b0;
+        show_multi_error_out  = 1'b0;
+        game_over_out         = 1'b0;
 
-        case (state)
+        case (state_out)
+            // State: IDLE
             IDLE: begin
-                // Check for game over first
-                if (win_register)
-                    next_state = GAME_END;
-                // Wait for player to select a cell and confirm
-                else if (row != 5'd0 && column != 5'd0 && confirm)
+                // Sit and wait for a confirm with non-zero row/col.
+                if (confirm_in && row_in != 5'd0 && column_in != 5'd0)
                     next_state = INPUT_VERIFICATION;
             end
 
+            // State: INPUT_VERIFICATION
             INPUT_VERIFICATION: begin
-                clear_errors = 1'b1;
-                
-                // Reject invalid inputs and show appropriate error
-                if (multiple_inputs_pressed) begin 
-                    multiple_inputs_error = 1'b1; 
-                    next_state = IDLE; 
-                end 
-                else if (cell_is_empty_in && first_turn_flag_in) begin
-                    // After first turn, can't click empty cells
-                    show_empty_error = 1'b1;
+                // Check errors in priority order (all computed in the datapath).
+                if (multiple_inputs_error_in) begin
+                    show_multi_error_out = 1'b1;
                     next_state = IDLE;
                 end
-                else if (cell_is_other_player) begin
-                    // Can't click opponent's cells
-                    show_owner_error = 1'b1;
+                else if (empty_row_or_col_error_in) begin
+                    show_row_col_error_out = 1'b1;
+                    next_state = IDLE;
+                end
+                else if (cell_is_empty_error_in) begin
+                    show_empty_error_out = 1'b1;
+                    next_state = IDLE;
+                end
+                else if (cell_is_other_player_error_in) begin
+                    show_owner_error_out = 1'b1;
                     next_state = IDLE;
                 end
                 else begin
-                    // Move is valid, start processing cells
-                    start_iteration = 1'b1;
+                    // Valid move: tell the datapath to apply it.
+                    start_iteration_out = 1'b1;
                     next_state = ITERATE_THROUGH_CELLS;
                 end
             end
 
+            // State: ITERATE_THROUGH_CELLS
             ITERATE_THROUGH_CELLS: begin
-                // Keep iterating while explosions are happening (chain reactions)
-                if (iterate_done) begin
-                    if (explode_flag)
-                        next_state = ITERATE_THROUGH_CELLS;  // more explosions, keep going
-                    else
-                        next_state = IDLE;  // board is stable, next player's turn
+                // Stay here while chain reactions are still happening.
+                if (!any_exploding_in) begin
+                    // Board is stable again.
+                    if (have_a_winner_in) begin
+                        next_state  = GAME_END;
+                        game_over_out = 1'b1;
+                    end
+                    else begin
+                        next_state        = IDLE;
+                        change_player_out = 1'b1;
+                    end
                 end
+                // else: stay in ITERATE_THROUGH_CELLS (default)
             end
 
+            // State: GAME_END
             GAME_END: begin
-                // Stay here until reset
-                next_state = GAME_END;
+                game_over_out = 1'b1;
+                next_state    = GAME_END;  // stay here until reset
             end
 
+            // State: RESET_STATE
             RESET_STATE: begin
-                // Go to idle on the next clock
                 next_state = IDLE;
             end
 
