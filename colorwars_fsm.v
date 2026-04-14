@@ -1,17 +1,17 @@
 `timescale 1ns / 1ps
 
-// Controller FSM for the Color Wars game.
+// Main game controller FSM for Color Wars
 //
-// High-level flow:
+// Turn flow:
 //   IDLE -> INPUT_VERIFICATION -> ITERATE_THROUGH_CELLS -> IDLE (or GAME_END)
 //
-// The datapath continuously computes the “is this move valid?” flags.
-// In INPUT_VERIFICATION we sample those flags and either reject the move
-// (with a one-cycle error pulse) or kick off an iteration.
+// The datapath computes all input validation errors combinationally.
+// The FSM checks them in INPUT_VERIFICATION and routes accordingly.
 //
-// While iterating, the board resolves one explosion wave per cycle. We sit in
-// ITERATE_THROUGH_CELLS until the board is stable again, then either end the
-// game or hand off to the other player.
+// During ITERATE_THROUGH_CELLS, the parallel cell array resolves one
+// "layer" of explosions per clock cycle. The FSM stays in this state
+// until any_exploding_in goes low (board is stable), then either
+// declares a winner or returns to IDLE for the next player's turn.
 
 module colorwars_fsm (
     input  wire       clk_a_in,
@@ -47,7 +47,9 @@ module colorwars_fsm (
     output reg  [2:0] state_out             // current FSM state (debug / external use)
 );
 
-    // State encoding (kept simple for debug).
+    // ---------------------------------------------------------------
+    // State encoding
+    // ---------------------------------------------------------------
     localparam IDLE                  = 3'd0;
     localparam INPUT_VERIFICATION    = 3'd1;
     localparam ITERATE_THROUGH_CELLS = 3'd2;
@@ -56,17 +58,34 @@ module colorwars_fsm (
 
     reg [2:0] next_state;
 
-    // State register (negedge clock, async reset).
-    always @(negedge clk_a_in or posedge reset_in) begin
+    // ---------------------------------------------------------------
+    // Logic to calculate to get posedge of confirm_in
+    // ---------------------------------------------------------------
+    reg confirm_prev;
+    always @(negedge clk_a_in) begin
+        if (reset_in)
+            confirm_prev <= 1'b0;
+        else
+            confirm_prev <= confirm_in;
+    end
+
+    wire confirm_rising = confirm_in & ~confirm_prev; // if past was 0 but now it's 1, then its the posedge!
+
+    // ---------------------------------------------------------------
+    // State register (negedge clk_a, async reset)
+    // ---------------------------------------------------------------
+    always @(negedge clk_a_in) begin
         if (reset_in)
             state_out <= RESET_STATE;
         else
             state_out <= next_state;
     end
 
-    // Next-state + outputs (combinational).
+    // ---------------------------------------------------------------
+    // Next-state and output logic (combinational)
+    // ---------------------------------------------------------------
     always @(*) begin
-        // Default: hold state, pulse nothing.
+        // Defaults: all outputs low, hold state
         next_state            = state_out;
         start_iteration_out   = 1'b0;
         change_player_out     = 1'b0;
@@ -77,16 +96,18 @@ module colorwars_fsm (
         game_over_out         = 1'b0;
 
         case (state_out)
-            // State: IDLE
+            // ---------------------------------------------------------
             IDLE: begin
-                // Sit and wait for a confirm with non-zero row/col.
-                if (confirm_in && row_in != 5'd0 && column_in != 5'd0)
+                // Wait for player to select a cell and press confirm.
+                // Basic sanity: row and column must be non-zero.
+                if (confirm_rising) // before I had  && row_in != 5'd0 && column_in != 5'd0, but wanted to have input_verification check
                     next_state = INPUT_VERIFICATION;
             end
 
-            // State: INPUT_VERIFICATION
+            // ---------------------------------------------------------
             INPUT_VERIFICATION: begin
-                // Check errors in priority order (all computed in the datapath).
+                // Check errors in priority order.  The datapath computes
+                // all of these combinationally from row/col/cell state.
                 if (multiple_inputs_error_in) begin
                     show_multi_error_out = 1'b1;
                     next_state = IDLE;
@@ -104,17 +125,19 @@ module colorwars_fsm (
                     next_state = IDLE;
                 end
                 else begin
-                    // Valid move: tell the datapath to apply it.
+                    // Move is valid — tell the datapath to apply it.
+                    // age_change_enable will be pulsed on the selected cell.
                     start_iteration_out = 1'b1;
                     next_state = ITERATE_THROUGH_CELLS;
                 end
             end
 
-            // State: ITERATE_THROUGH_CELLS
+            // ---------------------------------------------------------
             ITERATE_THROUGH_CELLS: begin
-                // Stay here while chain reactions are still happening.
+                // Stay here while any cell is exploding (chain reactions).
+                // Each clka/clkb cycle resolves one layer of explosions.
                 if (!any_exploding_in) begin
-                    // Board is stable again.
+                    // Board is stable.
                     if (have_a_winner_in) begin
                         next_state  = GAME_END;
                         game_over_out = 1'b1;
@@ -127,13 +150,13 @@ module colorwars_fsm (
                 // else: stay in ITERATE_THROUGH_CELLS (default)
             end
 
-            // State: GAME_END
+            // ---------------------------------------------------------
             GAME_END: begin
                 game_over_out = 1'b1;
-                next_state    = GAME_END;  // stay here until reset
+                next_state    = GAME_END;  // frozen until reset
             end
 
-            // State: RESET_STATE
+            // ---------------------------------------------------------
             RESET_STATE: begin
                 next_state = IDLE;
             end

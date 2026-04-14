@@ -1,17 +1,14 @@
 `timescale 1ns / 1ps
 
-// Per-cell state machine used by Color Wars.
+// Cell FSM for Color Wars game
+// Each cell on the 5x5 grid is controlled by its own instance of this module.
+// The cell tracks ownership (Player 1 or 2) and age (1, 2, or 3). When age
+// reaches 3 and the cell is activated again, it explodes and affects neighbors.
 //
-// There’s one of these for each of the 25 grid cells. It keeps track of:
-//   - who owns the cell (P1 vs P2)
-//   - the “age” counter (1..3)
-//
-// When a cell at age 3 gets hit again (either by a click or a takeover), it
-// briefly enters EXP, then clears back to EMPTY on the next cycle.
-//
-// Implementation notes:
-//   - Two-phase clocking: clka computes the next state, clkb latches it.
-//   - reset_in clears everything back to EMPTY.
+// Changes from original:
+//   - Added reset_in for game restart
+//   - Added default temp_state = state_out hold to prevent inferred latches
+//   - Changed clkb latch to non-blocking (<=) for proper synthesis
 
 module cell_fsm (
     input  wire       clka_in,
@@ -24,8 +21,8 @@ module cell_fsm (
     output reg  [2:0] state_out
 );
 
-    // Encoding: bit[0] is the player (0=P1, 1=P2); bits[2:1] carry the age.
-    // This layout matches the LED decode logic used elsewhere.
+    // State encoding: bit[0] = player (0=P1, 1=P2), bits[2:1] = age-related
+    // Chosen to make LED decoding easier
     parameter EMPTY = 3'b000;  // unowned
     parameter P1_1  = 3'b010;  // Player 1, age 1
     parameter P1_2  = 3'b100;  // Player 1, age 2
@@ -37,63 +34,65 @@ module cell_fsm (
 
     reg [2:0] temp_state;
 
-    // Phase A (clka): work out the next state.
-    always @(negedge clka_in or posedge reset_in) begin
+    // ---------------------------------------------------------------
+    // Phase 1 (clka): Compute next state
+    // ---------------------------------------------------------------
+    always @(negedge clka_in) begin
         if (reset_in) begin
             temp_state = EMPTY;
         end
         else begin
-            temp_state = state_out;  // default: hold
+            temp_state = state_out;  // default: hold current state
 
             case (state_out)
                 EMPTY: begin
-                    // On the first round, an empty cell can be claimed.
+                    // First turn: player can claim an empty cell
                     if ((first_turn_reg_in & age_change_enable_in) == 1'b1) begin
-                        if (player_reg_in == 1'b0) temp_state = P1_1;
-                        else                        temp_state = P2_1;
+                        if (player_reg_in == 1'b0) temp_state = P1_3;
+                        else                        temp_state = P2_3;
                     end
-                    // Neighbor explosion can also claim an empty cell.
+                    // Explosion from neighbor: claim this cell
                     if (takeover_enable_in) begin
                         if (player_reg_in == 1'b0) temp_state = P1_1;
                         else                        temp_state = P2_1;
                     end
                 end
 
-                // Player 1 cells
+                // --- Player 1 cells ---
                 P1_1: begin
-                    if (age_change_enable_in) temp_state = P1_2;
+                    if (age_change_enable_in)                        temp_state = P1_2;
                     else if (takeover_enable_in && player_reg_in == 1'b0) temp_state = P1_2;
                     else if (takeover_enable_in && player_reg_in == 1'b1) temp_state = P2_2;
                 end
 
                 P1_2: begin
-                    if (age_change_enable_in) temp_state = P1_3;
+                    if (age_change_enable_in)                        temp_state = P1_3;
                     else if (takeover_enable_in && player_reg_in == 1'b0) temp_state = P1_3;
                     else if (takeover_enable_in && player_reg_in == 1'b1) temp_state = P2_3;
                 end
 
                 P1_3: begin
-                    if (age_change_enable_in || takeover_enable_in) temp_state = EXP;
+                    if (age_change_enable_in || takeover_enable_in)   temp_state = EXP;
                 end
 
-                // Player 2 cells
+                // --- Player 2 cells ---
                 P2_1: begin
-                    if (age_change_enable_in) temp_state = P2_2;
+                    if (age_change_enable_in)                        temp_state = P2_2;
                     else if (takeover_enable_in && player_reg_in == 1'b0) temp_state = P1_2;
                     else if (takeover_enable_in && player_reg_in == 1'b1) temp_state = P2_2;
                 end
 
                 P2_2: begin
-                    if (age_change_enable_in) temp_state = P2_3;
+                    if (age_change_enable_in)                        temp_state = P2_3;
                     else if (takeover_enable_in && player_reg_in == 1'b0) temp_state = P1_3;
                     else if (takeover_enable_in && player_reg_in == 1'b1) temp_state = P2_3;
                 end
 
                 P2_3: begin
-                    if (age_change_enable_in || takeover_enable_in) temp_state = EXP;
+                    if (age_change_enable_in || takeover_enable_in)   temp_state = EXP;
                 end
 
-                // EXP is a one-cycle transient; it clears to EMPTY right after.
+                // Explosion clears to empty on the next cycle
                 EXP: begin
                     temp_state = EMPTY;
                 end
@@ -103,8 +102,10 @@ module cell_fsm (
         end
     end
 
-    // Phase B (clkb): latch the computed state.
-    always @(negedge clkb_in or posedge reset_in) begin
+    // ---------------------------------------------------------------
+    // Phase 2 (clkb): Latch computed state
+    // ---------------------------------------------------------------
+    always @(negedge clkb_in) begin
         if (reset_in)
             state_out <= EMPTY;
         else

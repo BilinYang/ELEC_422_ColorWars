@@ -1,19 +1,21 @@
 `timescale 1ns / 1ps
 
-// Color Wars datapath: the board, the decoding, and the “is this move legal?” logic.
+// Color Wars game datapath
 //
-// Big pieces in here:
-//   - 25 cell_fsm instances arranged as a 5x5 grid
-//   - row/column one-hot decoding
-//   - move validation flags back to the controller FSM
-//   - player tracking + first-round handling
-//   - basic win detection
+// Contains:
+//   - 25 cell_fsm instances (5x5 grid) with parallel explosion wiring
+//   - One-hot row/column decoding
+//   - Input validation (errors reported to FSM)
+//   - Player register and first-turn tracking
+//   - Win detection
 //
-// Explosions are wired combinationally: a cell’s takeover_enable is just the OR
-// of its four orthogonal neighbors being in EXP. Only one “wave” settles per
-// clka/clkb cycle, so chain reactions naturally take multiple cycles.
+// Explosion propagation is fully combinational: each cell's takeover_enable
+// is the OR of its orthogonal neighbors being in the EXP state. One "layer"
+// of explosions resolves per clka/clkb cycle; chain reactions naturally
+// propagate across multiple cycles while the FSM holds in ITERATE.
 //
-// Indexing is row-major: idx = row*5 + col (0..24).
+// Cell indexing: cell index = row * 5 + col  (0-24, row-major order)
+//   Neighbor offsets: up = idx-5, down = idx+5, left = idx-1, right = idx+1
 
 module colorwars_dp (
     input  wire       clka_in,
@@ -45,22 +47,26 @@ module colorwars_dp (
     output wire [74:0] all_cell_states_out  // 25 cells x 3 bits, for LED display
 );
 
-    // State constants used for comparisons (must match cell_fsm).
+    // ---------------------------------------------------------------
+    // State encoding (must match cell_fsm parameters)
+    // ---------------------------------------------------------------
     localparam EMPTY = 3'b000;
     localparam EXP   = 3'b001;
 
-    // Player register + a tiny first-round counter.
+    // ---------------------------------------------------------------
+    // Player register & first-turn tracking
+    // ---------------------------------------------------------------
     reg player_reg;
     reg [1:0] move_count;
 
-    always @(negedge clka_in or posedge reset_in) begin
+    always @(negedge clka_in) begin
         if (reset_in)
             player_reg <= 1'b0;         // Player 1 goes first
         else if (change_player_in)
             player_reg <= ~player_reg;
     end
 
-    always @(negedge clka_in or posedge reset_in) begin
+    always @(negedge clka_in) begin
         if (reset_in)
             move_count <= 2'd0;
         else if (change_player_in && move_count < 2'd2)
@@ -72,7 +78,9 @@ module colorwars_dp (
     assign player_reg_out  = player_reg;
     assign first_turn_out  = first_turn;
 
-    // One-hot decode for row/column.
+    // ---------------------------------------------------------------
+    // One-hot row/column decoding
+    // ---------------------------------------------------------------
     reg [2:0] rowNum;
     reg [2:0] colNum;
 
@@ -98,16 +106,20 @@ module colorwars_dp (
         endcase
     end
 
-    // Input validation (purely combinational).
-    // More than one bit set in either group.
+    // ---------------------------------------------------------------
+    // Input validation errors (combinational)
+    // ---------------------------------------------------------------
+    // Multiple buttons pressed in the same row or column group
     wire multi_row = (row_in & (row_in - 5'd1)) != 5'd0;
     wire multi_col = (column_in & (column_in - 5'd1)) != 5'd0;
     assign multiple_inputs_error_out = multi_row || multi_col;
 
-    // Missing a row or a column selection.
+    // No button pressed for row or column
     assign empty_row_or_col_error_out = (row_in == 5'd0) || (column_in == 5'd0);
 
-    // 25 cell instances + neighbor explosion wiring.
+    // ---------------------------------------------------------------
+    // 25 cell instances + wiring
+    // ---------------------------------------------------------------
     wire [2:0] cs       [0:24];   // cell state outputs
     wire       age_en   [0:24];   // age_change_enable per cell
     wire       take_en  [0:24];   // takeover_enable per cell
@@ -119,8 +131,10 @@ module colorwars_dp (
 
                 localparam integer IDX = r * 5 + c;
 
-                // Explosion propagation: look at the four neighbors.
-                // Edges just treat the missing neighbor as 0.
+                // --- Explosion propagation wiring ---
+                // Each cell's takeover_enable = OR of neighbors in EXP state.
+                // Boundary cells get 0 for missing neighbors.
+                // Uses generate-if so out-of-range indices are never elaborated.
                 wire up_exp, down_exp, left_exp, right_exp;
 
                 if (r > 0) begin : has_up
@@ -149,12 +163,12 @@ module colorwars_dp (
 
                 assign take_en[IDX] = up_exp | down_exp | left_exp | right_exp;
 
-                // Only the selected cell gets an age-change pulse, and only when
-                // the controller says to apply the move.
+                // --- Age-change enable ---
+                // Only the selected cell gets this, only when FSM says start.
                 assign age_en[IDX] = (r[2:0] == rowNum) && (c[2:0] == colNum)
                                      && start_iteration_in;
 
-                // Cell instance.
+                // --- Cell instance ---
                 cell_fsm cell_inst (
                     .clka_in              (clka_in),
                     .clkb_in              (clkb_in),
@@ -166,14 +180,16 @@ module colorwars_dp (
                     .state_out            (cs[IDX])
                 );
 
-                // Pack into the flat bus for display/debug.
+                // --- Collect into flat output bus ---
                 assign all_cell_states_out[3*IDX +: 3] = cs[IDX];
 
             end
         end
     endgenerate
 
-    // Selected-cell state (used to generate the error flags).
+    // ---------------------------------------------------------------
+    // Selected-cell state mux (for input validation)
+    // ---------------------------------------------------------------
     wire [4:0] sel_idx;
     assign sel_idx = rowNum * 3'd5 + {2'b00, colNum};
 
@@ -187,7 +203,7 @@ module colorwars_dp (
         end
     end
 
-    // Errors based on what’s currently in the selected cell.
+    // Cell-content errors
     wire selected_is_empty = (selected_cell_state == EMPTY);
     wire selected_is_other = !selected_is_empty
                              && (selected_cell_state != EXP)
@@ -196,9 +212,11 @@ module colorwars_dp (
     assign cell_is_empty_error_out         = selected_is_empty && !first_turn;
     assign cell_is_other_player_error_out  = selected_is_other;
 
-    // Global board status bits.
+    // ---------------------------------------------------------------
+    // Global board status
+    // ---------------------------------------------------------------
 
-    // Any cell currently in EXP?
+    // Any cell currently exploding?
     wire [24:0] is_exp;
     genvar gi;
     generate
@@ -208,8 +226,7 @@ module colorwars_dp (
     endgenerate
     assign any_exploding_out = |is_exp;
 
-    // Win detection: once the first round is over, if only one player has
-    // any owned cells remaining, that player wins.
+    // Win detection: all non-empty, non-EXP cells belong to one player
     wire [24:0] is_p1;
     wire [24:0] is_p2;
     generate
@@ -224,11 +241,12 @@ module colorwars_dp (
     wire any_p1 = |is_p1;
     wire any_p2 = |is_p2;
 
-    // Only declare a winner after both players have had a first move.
+    // Winner exists when only one player has cells on the board,
+    // and we're past the first round (both players have placed).
     assign have_a_winner_out = !first_turn
                                && ((any_p1 && !any_p2) || (!any_p1 && any_p2));
 
-    // Winner ID (only meaningful when have_a_winner_out is high).
-    assign winner_player_out = any_p2 ? 1'b1 : 1'b0;
+    // Which player won (only meaningful when have_a_winner_out == 1)
+    assign winner_player_out = any_p2 && have_a_winner_out;
 
 endmodule

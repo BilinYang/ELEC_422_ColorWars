@@ -1,16 +1,18 @@
 `timescale 1ns / 1ps
 
-// Top-level wrapper for Color Wars.
+// Color Wars top-level module
 //
-// This is mostly just glue: it hooks the controller FSM up to the datapath.
-// Inputs are the physical controls (row/col one-hot + confirm, reset, clocks),
-// outputs are the error pulses and the board state for the LED display.
+// Wires together the game FSM (control) and datapath (cell array + logic).
 //
-// all_cell_states is 25 packed 3-bit fields (row-major):
-//   cell(r,c) lives at all_cell_states[3*(r*5+c) +: 3]
-//   000=EMPTY, 001=EXP,
-//   010/100/110 = P1 age 1/2/3,
-//   011/101/111 = P2 age 1/2/3.
+// Physical I/O:
+//   Inputs:  two-phase clocks, reset, 5-bit one-hot row & column, confirm button
+//   Outputs: error LEDs, player indicator, game state, 75-bit cell states for
+//            LED matrix display, game-over flag, winning player
+//
+// The 75-bit all_cell_states bus carries every cell's 3-bit state:
+//   cell (r, c) = all_cell_states[ 3*(r*5+c) +: 3 ]
+//   Encoding: 000=EMPTY, 010=P1_age1, 100=P1_age2, 110=P1_age3,
+//             011=P2_age1, 101=P2_age2, 111=P2_age3, 001=EXP
 
 module colorwars_top (
     input  wire        clka,
@@ -39,23 +41,27 @@ module colorwars_top (
     output wire [74:0] all_cell_states
 );
 
-    // Internal wiring between FSM and datapath.
+    // ---------------------------------------------------------------
+    // Internal wires: FSM <-> Datapath
+    // ---------------------------------------------------------------
 
     // FSM -> Datapath
     wire start_iteration;
     wire change_player;
 
-    // Datapath -> FSM: error flags.
+    // Datapath -> FSM  (error flags)
     wire cell_is_empty_error;
     wire cell_is_other_player_error;
     wire empty_row_or_col_error;
     wire multiple_inputs_error;
 
-    // Datapath -> FSM: board status.
+    // Datapath -> FSM  (board status)
     wire any_exploding;
     wire have_a_winner;
 
-    // FSM instance.
+    // ---------------------------------------------------------------
+    // FSM instance
+    // ---------------------------------------------------------------
     colorwars_fsm fsm (
         .clk_a_in                    (clka),
         .reset_in                    (reset),
@@ -90,7 +96,9 @@ module colorwars_top (
         .state_out                   (state)
     );
 
-    // Datapath instance.
+    // ---------------------------------------------------------------
+    // Datapath instance
+    // ---------------------------------------------------------------
     colorwars_dp dp (
         .clka_in                     (clka),
         .clkb_in                     (clkb),
